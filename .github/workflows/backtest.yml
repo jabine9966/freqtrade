@@ -102,12 +102,9 @@ jobs:
 
       - name: Show backtest results
         run: |
-          STRATEGY="${{ github.event.inputs.strategy || 'MACrossRSIStrategy' }}"
-          
           echo "=== Backtest Results Summary ==="
           freqtrade backtesting-show \
             --config user_data/config.json \
-            --strategy $STRATEGY \
             --export-filename user_data/backtest_results/backtest-result.json
 
       - name: Upload backtest results
