@@ -1,0 +1,116 @@
+name: Freqtrade Backtest
+
+on:
+  push:
+    branches: [ develop ]
+    paths:
+      - 'user_data/strategies/**'
+      - 'user_data/config.json'
+      - '.github/workflows/backtest.yml'
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: 'Strategy name'
+        required: false
+        default: 'MACrossRSIStrategy'
+      timerange:
+        description: 'Time range (e.g. 20240101-20240630)'
+        required: false
+        default: '20240101-20240630'
+      timeframe:
+        description: 'Timeframe (e.g. 1h, 4h, 1d)'
+        required: false
+        default: '1h'
+      pairs:
+        description: 'Trading pairs (space separated)'
+        required: false
+        default: 'BTC/USDT ETH/USDT SOL/USDT'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install TA-Lib
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq build-essential wget
+          cd /tmp
+          wget -q http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz
+          tar xzf ta-lib-0.4.0-src.tar.gz
+          cd ta-lib
+          ./configure --prefix=/usr
+          make -j$(nproc)
+          sudo make install
+          sudo ldconfig
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ta-lib
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Download historical data
+        env:
+          EXCHANGE: okx
+        run: |
+          STRATEGY="${{ github.event.inputs.strategy || 'MACrossRSIStrategy' }}"
+          TIMERANGE="${{ github.event.inputs.timerange || '20240101-20240630' }}"
+          TIMEFRAME="${{ github.event.inputs.timeframe || '1h' }}"
+          PAIRS="${{ github.event.inputs.pairs || 'BTC/USDT ETH/USDT SOL/USDT' }}"
+          
+          echo "Downloading data for $EXCHANGE..."
+          echo "Pairs: $PAIRS"
+          echo "Timeframe: $TIMEFRAME"
+          echo "Timerange: $TIMERANGE"
+          
+          freqtrade download-data \
+            --config user_data/config.json \
+            --timerange $TIMERANGE \
+            --timeframes $TIMEFRAME \
+            --pairs $PAIRS
+
+      - name: Run backtest
+        run: |
+          STRATEGY="${{ github.event.inputs.strategy || 'MACrossRSIStrategy' }}"
+          TIMERANGE="${{ github.event.inputs.timerange || '20240101-20240630' }}"
+          TIMEFRAME="${{ github.event.inputs.timeframe || '1h' }}"
+          
+          echo "Running backtest with strategy: $STRATEGY"
+          echo "Timeframe: $TIMEFRAME"
+          echo "Timerange: $TIMERANGE"
+          
+          freqtrade backtesting \
+            --config user_data/config.json \
+            --strategy $STRATEGY \
+            --timerange $TIMERANGE \
+            --timeframe $TIMEFRAME \
+            --export trades
+
+      - name: Generate backtest report
+        run: |
+          STRATEGY="${{ github.event.inputs.strategy || 'MACrossRSIStrategy' }}"
+          
+          echo "=== Backtest Results Summary ==="
+          freqtrade backtesting-show \
+            --config user_data/config.json \
+            --strategy $STRATEGY \
+            --export-filename user_data/backtest_results/backtest-result.json
+
+      - name: Upload backtest results
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-results
+          path: |
+            user_data/backtest_results/
+          retention-days: 30
